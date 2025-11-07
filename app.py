@@ -2,84 +2,97 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from sqlalchemy import create_engine
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
-# 1️⃣ Database connection
-engine = create_engine('sqlite:///database.db')
+# ---------- DATABASE SETUP ----------
+engine = create_engine('sqlite:///cloudbase.db')
 
-# 2️⃣ Define table columns
-columns = [
+# Define columns
+COLUMNS = [
     "Date", "Tasks", "DOS", "Status", "Audit_Status",
-    "User_ID", "Comments", "Auditor_Comments",
-    "Audit_Date", "Timestamp", "Time_Difference", "Source"
+    "User_ID", "Comments", "Auditor_Comments", "Audit_Date",
+    "Timestamp", "Time_Difference", "Source"
 ]
 
-# 3️⃣ Helper function to load user data
-def load_user_data(user):
+# ---------- HELPER FUNCTIONS ----------
+def get_user_data(user):
     try:
         df = pd.read_sql(f"SELECT * FROM '{user}'", engine)
     except:
-        df = pd.DataFrame(columns=columns)
+        df = pd.DataFrame(columns=COLUMNS)
     return df
 
-# 4️⃣ Save entry to database
-def save_entry(user, entry):
-    df = load_user_data(user)
-    df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
-    df.to_sql(user, engine, if_exists='replace', index=False)
+def save_user_data(user, df):
+    df.to_sql(user, engine, if_exists="replace", index=False)
 
-# 5️⃣ Calculate time difference
-def calculate_time_diff(user):
-    df = load_user_data(user)
-    if len(df) >= 2:
-        last_time = datetime.fromisoformat(df.iloc[-2]["Timestamp"])
-        now_time = datetime.fromisoformat(df.iloc[-1]["Timestamp"])
-        diff = now_time - last_time
-        df.loc[df.index[-1], "Time_Difference"] = str(diff)
-        df.to_sql(user, engine, if_exists='replace', index=False)
+def get_all_data():
+    from sqlalchemy import create_engine, inspect
 
-# 6️⃣ Streamlit UI
-st.title("🧮 Productivity & Audit Tracker")
+def get_all_data():
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    all_data = []
+    for t in tables:
+        all_data.append(pd.read_sql(f"SELECT * FROM '{t}'", engine))
+    if all_data:
+        return pd.concat(all_data, ignore_index=True)
+    return pd.DataFrame(columns=COLUMNS)
 
-user = st.text_input("Enter your User Name (Source):").strip()
+
+# ---------- APP UI ----------
+st.set_page_config(page_title="Cloud Database", layout="wide")
+st.title("☁️ Cloud-Based Productivity Tracker")
+
+user = st.text_input("👤 Enter your name (used as your personal sheet):").strip()
 
 if user:
-    st.subheader(f"User Sheet: {user}")
+    st.subheader(f"📄 Sheet for {user}")
 
-    task = st.text_input("Task / Timesheet Name:")
-    dos = st.text_input("DOS:")
-    status = st.selectbox("Status", ["", "Uploaded", "Already Uploaded", "Only Timesheet Uploaded", "Rejected", "Audited", "Previously Processed"])
-    audit_status = st.checkbox("Audit Done?")
-    user_id = st.text_input("User ID:")
-    comments = st.text_area("Comments:")
-    auditor_comments = st.text_area("Auditor Comments:")
+    df = get_user_data(user)
 
-    if st.button("Add Entry"):
-        now = datetime.now()
-        entry = {
-            "Date": now.date(),
-            "Tasks": task,
-            "DOS": dos,
-            "Status": status,
-            "Audit_Status": audit_status,
-            "User_ID": user_id,
-            "Comments": comments,
-            "Auditor_Comments": auditor_comments,
-            "Audit_Date": now.date() if audit_status else "",
-            "Timestamp": now.isoformat(),
-            "Time_Difference": "",
-            "Source": user
-        }
-        save_entry(user, entry)
-        calculate_time_diff(user)
-        st.success("✅ Entry added successfully!")
+    # If no data yet, create empty DataFrame
+    if df.empty:
+        df = pd.DataFrame(columns=COLUMNS)
 
-    # Display user's data
-    user_df = load_user_data(user)
-    st.dataframe(user_df)
+    # Display editable grid (Excel-like)
+    gb = GridOptionsBuilder.from_dataframe(df)
+    gb.configure_default_column(editable=True, resizable=True)
+    gb.configure_grid_options(enableRangeSelection=True)
+    gb.configure_selection('multiple', use_checkbox=True)
+    grid_options = gb.build()
 
-    # Combined data view
-    if st.button("Show Combined Data"):
-        tables = engine.table_names()
-        all_data = pd.concat([load_user_data(u) for u in tables], ignore_index=True)
-        st.subheader("📊 Combined Data (All Users)")
-        st.dataframe(all_data)
+    grid_response = AgGrid(
+        df,
+        gridOptions=grid_options,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
+        fit_columns_on_grid_load=True,
+        theme="alpine"
+    )
+
+    updated_df = grid_response['data']
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("💾 Save Changes"):
+            # Add timestamps and date auto-fill
+            now = datetime.now()
+            updated_df["Timestamp"] = updated_df["Timestamp"].fillna(now.isoformat())
+            updated_df["Date"] = updated_df["Date"].fillna(now.date().isoformat())
+            updated_df["Source"] = user
+            save_user_data(user, updated_df)
+            st.success("✅ Data saved successfully!")
+
+    with col2:
+        if st.button("➕ Add New Row"):
+            new_row = pd.DataFrame([{col: "" for col in COLUMNS}])
+            df = pd.concat([updated_df, new_row], ignore_index=True)
+            save_user_data(user, df)
+            st.experimental_rerun()
+
+    st.markdown("### 📊 Your Current Data")
+    st.dataframe(updated_df, use_container_width=True)
+
+    st.markdown("---")
+    if st.button("📈 View Combined Data (All Users)"):
+        combined_df = get_all_data()
+        st.dataframe(combined_df, use_container_width=True)
