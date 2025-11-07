@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 # ---------- DATABASE SETUP ----------
@@ -37,7 +37,6 @@ def get_all_data():
     if all_data:
         return pd.concat(all_data, ignore_index=True)
     return pd.DataFrame(columns=COLUMNS)
-
 
 # ---------- APP UI ----------
 st.set_page_config(page_title="Cloud Database", layout="wide")
