@@ -96,3 +96,17 @@ if user:
     if st.button("📈 View Combined Data (All Users)"):
         combined_df = get_all_data()
         st.dataframe(combined_df, use_container_width=True)
+
+# 🧹 Temporary cleanup tool (run once)
+if st.button("🗑️ Delete a User Sheet"):
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    st.write("Existing user sheets:", tables)
+    sheet_to_delete = st.selectbox("Select a sheet to delete", tables)
+    confirm = st.checkbox(f"Confirm delete '{sheet_to_delete}'")
+
+    if confirm and st.button("⚠️ Permanently Delete"):
+        with engine.connect() as conn:
+            conn.execute(f"DROP TABLE IF EXISTS '{sheet_to_delete}'")
+        st.success(f"✅ '{sheet_to_delete}' deleted successfully!")
+        st.experimental_rerun()
