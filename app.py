@@ -27,9 +27,8 @@ def get_user_data(user):
         df = pd.DataFrame(columns=COLUMNS)
     return df
 
-def save_user_data(user, df):
-    """Save user's sheet to the database"""
-    df.to_sql(user, engine, if_exists="replace", index=False)
+def safe_user = user.replace(" ", "_").lower()
+df.to_sql(safe_user, engine, if_exists="replace", index=False)
 
 def get_all_data():
     """Combine all user sheets into a single DataFrame"""
@@ -149,3 +148,4 @@ if tables:
             st.experimental_rerun()
 else:
     st.info("No user sheets found in the database.")
+
