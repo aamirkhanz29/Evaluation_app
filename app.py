@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 from sqlalchemy import create_engine, inspect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+import io
 
 # -----------------------------
 # DATABASE SETUP
@@ -37,7 +38,12 @@ def get_all_data():
     tables = inspector.get_table_names()
     all_data = []
     for t in tables:
-        all_data.append(pd.read_sql(f"SELECT * FROM '{t}'", engine))
+        try:
+            df = pd.read_sql(f"SELECT * FROM '{t}'", engine)
+            df["Source_Sheet"] = t
+            all_data.append(df)
+        except:
+            continue
     if all_data:
         return pd.concat(all_data, ignore_index=True)
     return pd.DataFrame(columns=COLUMNS)
@@ -70,7 +76,7 @@ if user_input:
         df = pd.DataFrame(columns=COLUMNS)
 
     # Dropdown values
-    status_options = ["Uploaded", "Already Uploaded", "Rejected", "Only Sheet Uploaded", "Audited", "Previoulsy Processed"]
+    status_options = ["Pending", "In Progress", "Completed", "Audited", "Rejected"]
     audit_options = [True, False]
 
     # Build grid options
@@ -79,7 +85,7 @@ if user_input:
     gb.configure_grid_options(enableRangeSelection=True)
     gb.configure_selection('multiple', use_checkbox=True)
 
-    # Configure dropdowns and checkboxes
+    # Configure dropdowns
     gb.configure_column("Status", editable=True, cellEditor='agSelectCellEditor',
                         cellEditorParams={'values': status_options})
     gb.configure_column("Audit_Status", editable=True, cellEditor='agSelectCellEditor',
@@ -160,5 +166,33 @@ if tables:
                 conn.execute(f"DROP TABLE IF EXISTS '{sheet_to_delete}'")
             st.success(f"✅ Sheet '{sheet_to_delete}' deleted!")
             st.experimental_rerun()
+
+    st.markdown("### 💾 Download All User Data")
+    combined_df = get_all_data()
+    if not combined_df.empty:
+        combined_df = calculate_time_diff(combined_df)
+
+        # Prepare Excel and CSV for download
+        csv_data = combined_df.to_csv(index=False).encode('utf-8')
+
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+            combined_df.to_excel(writer, index=False, sheet_name="All_Data")
+
+        st.download_button(
+            label="⬇️ Download Combined Data as CSV",
+            data=csv_data,
+            file_name="combined_data.csv",
+            mime="text/csv"
+        )
+
+        st.download_button(
+            label="⬇️ Download Combined Data as Excel",
+            data=excel_buffer.getvalue(),
+            file_name="combined_data.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.info("No data available to download.")
 else:
     st.info("No user sheets found.")
