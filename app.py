@@ -91,113 +91,75 @@ if user_input:
     # -----------------------------
     # Configure AG-Grid
     # -----------------------------
-    gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(
-        editable=True,
-        resizable=True,
-        sortable=True,
-        filter=True,
-        wrapText=True,
-        autoHeight=True,
-        cellStyle={'border': '1px solid #e0e0e0', 'fontSize': '13px'},
-    )
-    gb.configure_column(
-        "Status",
-        editable=True,
-        cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": status_options},
-    )
-    gb.configure_column(
-        "Audit_Status",
-        editable=True,
-        cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": ["True", "False"]},
-    )
+   from st_aggrid.shared import JsCode
 
-    gb.configure_grid_options(
-        enableRangeSelection=True,
-        enableClipboard=True,
-        clipboardDelimiters={"row": "\n", "column": "\t"},
-        stopEditingWhenCellsLoseFocus=False,
-        undoRedoCellEditing=True,
-        undoRedoCellEditingLimit=100,
-        enableFillHandle=True,  # Excel-style drag fill
-        rowDragManaged=True,
-    )
+# build grid options
+gb = GridOptionsBuilder.from_dataframe(df)
 
-    grid_options = gb.build()
+gb.configure_default_column(
+    editable=True,
+    resizable=True,
+    sortable=True,
+    filter=True,
+    wrapText=True,
+    autoHeight=True,
+    cellStyle={'border': '1px solid #e0e0e0', 'fontSize': '13px'},
+)
 
-    # Add a small style hint
-    st.info("💡 Tip: You can copy from Excel or Google Sheets and paste directly into this grid (Ctrl + V).")
+# dropdowns
+gb.configure_column(
+    "Status",
+    editable=True,
+    cellEditor="agSelectCellEditor",
+    cellEditorParams={"values": status_options},
+)
+gb.configure_column(
+    "Audit_Status",
+    editable=True,
+    cellEditor="agSelectCellEditor",
+    cellEditorParams={"values": ["True", "False"]},
+)
 
-    grid_response = AgGrid(
-        df,
-        gridOptions=grid_options,
-        update_mode=GridUpdateMode.VALUE_CHANGED,
-        fit_columns_on_grid_load=True,
-        allow_unsafe_jscode=True,
-        theme="alpine",
-        height=550,
-        width='100%',
-    )
+# grid options for Excel-like copy/paste
+gb.configure_grid_options(
+    enableRangeSelection=True,
+    enableClipboard=True,
+    suppressClipboardPaste=False,   # 🔑 allow multi-cell paste
+    clipboardDelimiters={"row": "\n", "column": "\t"},
+    stopEditingWhenCellsLoseFocus=False,
+    undoRedoCellEditing=True,
+    undoRedoCellEditingLimit=200,
+    enableFillHandle=True,
+    suppressRowClickSelection=True,
+)
 
-    updated_df = grid_response["data"]
+# Auto-fit columns when grid ready
+gb.configure_grid_options(onGridReady=JsCode("""
+function(params) {
+    params.api.sizeColumnsToFit();
+    document.addEventListener('paste', function(e) {
+        // focus grid before paste
+        params.api.gridBodyCtrl.focusController.focusGridView();
+    });
+}
+"""))
 
-    # -----------------------------
-    # Action Buttons
-    # -----------------------------
-    col1, col2 = st.columns(2)
+grid_options = gb.build()
 
-    with col1:
-        if st.button("💾 Save Changes"):
-            now = datetime.now()
+st.info("💡 Tip: Copy multiple cells in Excel (Ctrl+C) → click inside this grid → paste (Ctrl+V).")
 
-            # Convert strings to datetime safely
-            updated_df["Date"] = pd.to_datetime(updated_df["Date"], errors='coerce')
-            updated_df["Timestamp"] = pd.to_datetime(updated_df["Timestamp"], errors='coerce')
-
-            # Auto-fill current date/timestamp if missing
-            updated_df["Date"] = updated_df["Date"].fillna(now.date())
-            updated_df["Timestamp"] = updated_df["Timestamp"].fillna(now.isoformat())
-
-            # Auto-fill audit date if audited
-            updated_df["Audit_Date"] = updated_df.apply(
-                lambda r: now.date()
-                if str(r.get("Audit_Status")).lower() == "true" and not r.get("Audit_Date")
-                else r.get("Audit_Date"),
-                axis=1,
-            )
-
-            updated_df["Source"] = user
-            updated_df = calculate_time_diff(updated_df)
-
-            save_user_data(user, updated_df)
-            st.success("✅ All changes saved successfully!")
-
-    with col2:
-        uploaded_file = st.file_uploader("📤 Upload CSV/Excel for Bulk Entry", type=["csv", "xlsx"])
-        if uploaded_file:
-            if uploaded_file.name.endswith(".csv"):
-                bulk_df = pd.read_csv(uploaded_file)
-            else:
-                bulk_df = pd.read_excel(uploaded_file)
-
-            for col in COLUMNS:
-                if col not in bulk_df.columns:
-                    bulk_df[col] = ""
-            bulk_df = bulk_df[COLUMNS]
-
-            merged_df = pd.concat([updated_df, bulk_df], ignore_index=True)
-            merged_df = merged_df.drop_duplicates(subset=["Date", "Tasks", "DOS"], keep="last")
-            merged_df["Source"] = user
-            merged_df = calculate_time_diff(merged_df)
-
-            # Keep 5 blank rows again
-            for _ in range(5):
-                merged_df.loc[len(merged_df)] = ["" for _ in COLUMNS]
-
-            save_user_data(user, merged_df)
-            st.success(f"✅ {len(bulk_df)} rows uploaded successfully for {user}!")
+# render grid
+grid_response = AgGrid(
+    df,
+    gridOptions=grid_options,
+    update_mode=GridUpdateMode.VALUE_CHANGED,
+    fit_columns_on_grid_load=False,
+    allow_unsafe_jscode=True,
+    theme="alpine",
+    height=550,
+    width='100%',
+)
+updated_df = grid_response["data"]
 
 # -----------------------------
 # ADMIN PANEL
