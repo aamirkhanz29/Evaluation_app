@@ -1,219 +1,144 @@
-import streamlit as st
+# app_dash.py
+import dash
+from dash import Dash, html, dcc, Input, Output, State
+import dash_ag_grid as dag
 import pandas as pd
+from sqlalchemy import create_engine
 from datetime import datetime
-from sqlalchemy import create_engine, inspect
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-from st_aggrid.shared import JsCode
 import io
+import base64
 
 # -----------------------------
 # DATABASE SETUP
 # -----------------------------
 engine = create_engine('sqlite:///cloudbase.db')
-
-# Define columns
+TABLE_NAME = "main_table"
 COLUMNS = [
     "Date", "Tasks", "DOS", "Status", "Audit_Status",
     "User_ID", "Comments", "Auditor_Comments",
     "Audit_Date", "Timestamp", "Time_Difference", "Source"
 ]
+status_options = ["Uploaded", "Already Uploaded", "Only Sheet uploaded", "Audited", "Rejected", "Previously Processed"]
 
-# -----------------------------
-# HELPER FUNCTIONS
-# -----------------------------
-def get_user_data(user):
-    """Load user's sheet from the database"""
-    try:
-        df = pd.read_sql(f"SELECT * FROM '{user}'", engine)
-    except:
-        df = pd.DataFrame(columns=COLUMNS)
-    return df
-
-def save_user_data(user, df):
-    """Save user's data back to the database"""
-    df.to_sql(user, engine, if_exists="replace", index=False)
-
-def get_all_data():
-    """Combine all sheets"""
-    inspector = inspect(engine)
-    tables = inspector.get_table_names()
-    all_data = []
-    for t in tables:
-        try:
-            df = pd.read_sql(f"SELECT * FROM '{t}'", engine)
-            df["Source_Sheet"] = t
-            all_data.append(df)
-        except:
-            continue
-    if all_data:
-        return pd.concat(all_data, ignore_index=True)
-    return pd.DataFrame(columns=COLUMNS)
-
-def calculate_time_diff(df):
-    """Calculate time difference between timestamps"""
-    df = df.copy()
-    df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors='coerce')
-    df["Time_Difference"] = df["Timestamp"].diff().fillna(pd.Timedelta(seconds=0))
-    df["Time_Difference"] = df["Time_Difference"].astype(str)
-    return df
-
-def clean_user_name(name):
-    """Normalize usernames to prevent duplicates"""
-    return name.strip().lower()
-
-# -----------------------------
-# STREAMLIT UI
-# -----------------------------
-st.set_page_config(page_title="Cloud Tracker", layout="wide")
-st.title("☁️ Cloud-Based Productivity & Audit Tracker")
-
-user_input = st.text_input("👤 Enter your name:")
-
-if user_input:
-    user = clean_user_name(user_input)
-    st.subheader(f"📄 Sheet for {user}")
-
-    # Load user data
-    df = get_user_data(user)
-
-    # Ensure all columns exist
-    for col in COLUMNS:
-        if col not in df.columns:
-            df[col] = ""
-        df[col] = df[col].astype(str).replace("None", "")
-
-    # Always show 10 blank rows for pasting
-    if df.empty:
-        df = pd.DataFrame([{col: "" for col in COLUMNS} for _ in range(10)])
-    else:
-        # Append 10 blank rows for new data
-        for _ in range(10):
-            df.loc[len(df)] = ["" for _ in COLUMNS]
-
-    # Dropdown options
-    status_options = ["Uploaded", "Already Uploaded", "Only Sheet uploaded", "Audited", "Rejected", "Previously Processed"]
-
-    # -----------------------------
-    # CONFIGURE AG-GRID
-    # -----------------------------
-    gb = GridOptionsBuilder.from_dataframe(df)
-
-    gb.configure_default_column(
-        editable=True,
-        resizable=True,
-        sortable=True,
-        filter=True,
-        wrapText=True,
-        autoHeight=True,
-        cellStyle={'border': '1px solid #e0e0e0', 'fontSize': '13px'},
-    )
-
-    gb.configure_column(
-        "Status",
-        editable=True,
-        cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": status_options},
-    )
-    gb.configure_column(
-        "Audit_Status",
-        editable=True,
-        cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": ["True", "False"]},
-    )
-
-    # Enable Excel-style copy/paste
-    gb.configure_grid_options(
-        enableRangeSelection=True,
-        enableClipboard=True,
-        suppressClipboardPaste=False,
-        clipboardDelimiters={"row": "\n", "column": "\t"},
-        stopEditingWhenCellsLoseFocus=False,
-        undoRedoCellEditing=True,
-        undoRedoCellEditingLimit=200,
-        enableFillHandle=True,
-        suppressRowClickSelection=True,
-    )
-
-    # Auto-fit columns and focus grid for paste
-    gb.configure_grid_options(onGridReady=JsCode("""
-        function(params) {
-            params.api.sizeColumnsToFit();
-            document.addEventListener('paste', function(e) {
-                params.api.gridBodyCtrl.focusController.focusGridView();
-            });
-        }
-    """))
-
-    grid_options = gb.build()
-
-    st.info("💡 Tip: Copy multiple cells from Excel → click anywhere in this grid (once, do not double-click) → Ctrl+V to paste.")
-
-    grid_response = AgGrid(
-        df,
-        gridOptions=grid_options,
-        update_mode=GridUpdateMode.VALUE_CHANGED,
-        fit_columns_on_grid_load=False,
-        allow_unsafe_jscode=True,
-        theme="alpine",
-        height=550,
-        width='100%',
-    )
-
-    updated_df = grid_response["data"]
-
-    # -----------------------------
-    # SAVE BUTTON
-    # -----------------------------
-    if st.button("💾 Save Changes"):
-        updated_df["Source"] = user
-        updated_df = calculate_time_diff(updated_df)
-        save_user_data(user, updated_df)
-        st.success(f"✅ Changes saved for {user}!")
-
-# -----------------------------
-# ADMIN PANEL
-# -----------------------------
-st.markdown("---")
-st.subheader("🛠️ Admin Panel")
-
-inspector = inspect(engine)
-tables = inspector.get_table_names()
-
-if tables:
-    st.write("Existing user sheets:", tables)
-    sheet_to_delete = st.selectbox("Select a sheet to delete", [""] + tables)
-    confirm_delete = st.checkbox(f"Confirm delete '{sheet_to_delete}'")
-
-    if sheet_to_delete and confirm_delete:
-        if st.button("⚠️ Delete Selected Sheet"):
-            with engine.connect() as conn:
-                conn.execute(f"DROP TABLE IF EXISTS '{sheet_to_delete}'")
-            st.success(f"✅ Sheet '{sheet_to_delete}' deleted!")
-            st.experimental_rerun()
-
-    st.markdown("### 💾 Download All User Data")
-    combined_df = get_all_data()
-    if not combined_df.empty:
-        combined_df = calculate_time_diff(combined_df)
-
-        csv_data = combined_df.to_csv(index=False).encode("utf-8")
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-            combined_df.to_excel(writer, index=False, sheet_name="All_Data")
-
-        st.download_button(
-            label="⬇️ Download Combined Data as CSV",
-            data=csv_data,
-            file_name="combined_data.csv",
-            mime="text/csv"
+# Ensure table exists
+with engine.connect() as conn:
+    conn.exec_driver_sql(f"""
+        CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+            Date TEXT, Tasks TEXT, DOS TEXT, Status TEXT, Audit_Status TEXT,
+            User_ID TEXT, Comments TEXT, Auditor_Comments TEXT,
+            Audit_Date TEXT, Timestamp TEXT, Time_Difference TEXT, Source TEXT
         )
-        st.download_button(
-            label="⬇️ Download Combined Data as Excel",
-            data=excel_buffer.getvalue(),
-            file_name="combined_data.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    else:
-        st.info("No data available to download.")
+    """)
+
+# Load initial data
+try:
+    df = pd.read_sql(f"SELECT * FROM {TABLE_NAME}", engine)
+except:
+    df = pd.DataFrame(columns=COLUMNS)
+
+# Always have 10 blank rows for pasting
+if df.empty:
+    df = pd.DataFrame([{col: "" for col in COLUMNS} for _ in range(10)])
 else:
-    st.info("No user sheets found.")
+    for _ in range(10):
+        df.loc[len(df)] = ["" for _ in COLUMNS]
+
+# -----------------------------
+# DASH APP
+# -----------------------------
+app = Dash(__name__)
+app.title = "Cloud-Based Productivity Tracker"
+
+app.layout = html.Div([
+    html.H2("☁️ Cloud-Based Productivity Tracker"),
+    html.Div([
+        html.Label("User Name:"),
+        dcc.Input(id="user-input", type="text", placeholder="Enter your name"),
+        html.Button("Load Sheet", id="load-btn")
+    ], style={"margin-bottom": "20px"}),
+
+    html.Div([
+        dag.AgGrid(
+            id="excel-grid",
+            columnDefs=[{"headerName": c, "field": c, "editable": True} for c in COLUMNS],
+            rowData=df.to_dict("records"),
+            defaultColDef={"resizable": True, "sortable": True, "filter": True},
+            columnSize="sizeToFit",
+            dashGridOptions={
+                "enableRangeSelection": True,
+                "enableFillHandle": True,
+                "clipboardPaste": True,   # multi-cell paste
+                "suppressColumnVirtualisation": True, # show all columns
+                "suppressRowVirtualisation": False,
+                "rowSelection": "multiple",
+                "domLayout": "normal",
+            },
+            style={"height": "500px", "width": "100%"}
+        )
+    ]),
+
+    html.Div([
+        html.Button("💾 Save Changes", id="save-btn", n_clicks=0),
+        html.Div(id="save-output", style={"margin-top": "10px", "color": "green"}),
+    ], style={"margin-top": "20px"}),
+
+    html.Hr(),
+    html.H4("📥 Download Combined Data"),
+    html.Div([
+        html.Button("Download CSV", id="download-csv-btn"),
+        dcc.Download(id="download-csv")
+    ])
+])
+
+# -----------------------------
+# CALLBACKS
+# -----------------------------
+@app.callback(
+    Output("excel-grid", "rowData"),
+    Input("load-btn", "n_clicks"),
+    State("user-input", "value")
+)
+def load_user_data(n_clicks, user):
+    if not user:
+        return df.to_dict("records")
+    user_clean = user.strip().lower()
+    try:
+        df_user = pd.read_sql(f"SELECT * FROM '{user_clean}'", engine)
+    except:
+        df_user = pd.DataFrame(columns=COLUMNS)
+    # Add 10 blank rows
+    for _ in range(10):
+        df_user.loc[len(df_user)] = ["" for _ in COLUMNS]
+    return df_user.to_dict("records")
+
+@app.callback(
+    Output("save-output", "children"),
+    Input("save-btn", "n_clicks"),
+    State("user-input", "value"),
+    State("excel-grid", "rowData")
+)
+def save_data(n_clicks, user, rows):
+    if n_clicks == 0 or not user:
+        return ""
+    df_save = pd.DataFrame(rows)
+    df_save["Source"] = user.strip().lower()
+    df_save.to_sql(user.strip().lower(), engine, if_exists="replace", index=False)
+    # also save to main_table
+    df_save.to_sql(TABLE_NAME, engine, if_exists="replace", index=False)
+    return f"✅ Saved {len(df_save)} rows for {user}!"
+
+@app.callback(
+    Output("download-csv", "data"),
+    Input("download-csv-btn", "n_clicks")
+)
+def download_csv(n_clicks):
+    if n_clicks is None or n_clicks == 0:
+        return dash.no_update
+    df_all = pd.read_sql(f"SELECT * FROM {TABLE_NAME}", engine)
+    return dcc.send_data_frame(df_all.to_csv, "combined_data.csv", index=False)
+
+# -----------------------------
+# RUN SERVER
+# -----------------------------
+if __name__ == "__main__":
+    app.run_server(debug=True)
