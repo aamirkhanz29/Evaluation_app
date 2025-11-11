@@ -82,7 +82,7 @@ if user_input:
     # Build grid options
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(editable=True, resizable=True)
-    gb.configure_grid_options(enableRangeSelection=True)
+    gb.configure_grid_options(enableRangeSelection=True, enableCellTextSelection=True, enableClipboard=True)
     gb.configure_selection('multiple', use_checkbox=True)
 
     # Configure dropdowns
