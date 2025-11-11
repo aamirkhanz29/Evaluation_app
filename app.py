@@ -79,59 +79,74 @@ if user_input:
     # Load or initialize data
     df = get_user_data(user)
     if df.empty:
-        # Preload 5 empty rows so user can paste multiple entries easily
-        df = pd.DataFrame([{col: "" for col in COLUMNS} for _ in range(5)])
+        df = pd.DataFrame([{col: "" for col in COLUMNS} for _ in range(20)])
 
-    # Dropdown values
+    # Dropdown options
     status_options = ["Pending", "In Progress", "Completed", "Audited", "Rejected"]
 
-    # Build editable grid
+    # ------------------------------------------------
+    # Build Excel-like AgGrid
+    # ------------------------------------------------
     gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(editable=True, resizable=True)
+    gb.configure_default_column(
+        editable=True,
+        resizable=True,
+        sortable=True,
+        filter=True,
+        wrapText=True,
+        autoHeight=True,
+    )
     gb.configure_grid_options(
         enableRangeSelection=True,
-        enableCellTextSelection=True,
         enableClipboard=True,
-        rowSelection='multiple',
-        rowDragManaged=True,
-        suppressRowClickSelection=False,
-        stopEditingWhenCellsLoseFocus=False
+        clipboardDelimiters={"row": "\n", "column": "\t"},
+        stopEditingWhenCellsLoseFocus=False,
+        enterMovesDownAfterEdit=True,
+        suppressRowClickSelection=True,
+        undoRedoCellEditing=True,
+        undoRedoCellEditingLimit=100,
+        enableFillHandle=True,  # drag-fill like Excel
     )
 
     gb.configure_column(
         "Status",
         editable=True,
-        cellEditor='agSelectCellEditor',
-        cellEditorParams={'values': status_options}
+        cellEditor="agSelectCellEditor",
+        cellEditorParams={"values": status_options},
     )
     gb.configure_column(
         "Audit_Status",
         editable=True,
-        cellEditor='agSelectCellEditor',
-        cellEditorParams={'values': [True, False]}
+        cellEditor="agSelectCellEditor",
+        cellEditorParams={"values": [True, False]},
     )
 
     grid_options = gb.build()
+
+    st.info("💡 Tip: You can copy from Excel or Sheets and paste here directly (Ctrl + V).")
 
     grid_response = AgGrid(
         df,
         gridOptions=grid_options,
         update_mode=GridUpdateMode.VALUE_CHANGED,
         fit_columns_on_grid_load=True,
-        allow_unsafe_jscode=True,  # required for full clipboard/paste
-        theme="alpine"
+        allow_unsafe_jscode=True,
+        theme="alpine",
+        height=550,
     )
 
     updated_df = grid_response["data"]
 
-    # Action buttons
+    # ------------------------------------------------
+    # Buttons
+    # ------------------------------------------------
     col1, col2 = st.columns(2)
 
     with col1:
         if st.button("💾 Save Changes"):
             now = datetime.now()
 
-            # Clean up data before save
+            # Clean data
             updated_df["Date"] = pd.to_datetime(updated_df["Date"], errors="coerce")
             updated_df["Timestamp"] = pd.to_datetime(updated_df["Timestamp"], errors="coerce")
 
@@ -142,11 +157,19 @@ if user_input:
                 lambda r: now.date()
                 if str(r.get("Audit_Status")).lower() == "true" and pd.isna(r.get("Audit_Date"))
                 else r.get("Audit_Date"),
-                axis=1
+                axis=1,
             )
 
             updated_df["Source"] = user
             updated_df = calculate_time_diff(updated_df)
+
+            # Always keep a few blank rows for new entries
+            blanks_needed = 5 - (updated_df.tail(5).notna().any(axis=1).sum())
+            if blanks_needed > 0:
+                for _ in range(blanks_needed):
+                    updated_df.loc[len(updated_df)] = [""] * len(COLUMNS)
+
+            # Save to DB
             save_user_data(user, updated_df)
             st.success("✅ All changes saved successfully!")
 
@@ -167,9 +190,14 @@ if user_input:
             merged_df = merged_df.drop_duplicates(subset=["Date", "Tasks", "DOS"], keep="last")
             merged_df["Source"] = user
             merged_df = calculate_time_diff(merged_df)
-            save_user_data(user, merged_df)
 
+            # Add blank rows for convenience
+            for _ in range(5):
+                merged_df.loc[len(merged_df)] = [""] * len(COLUMNS)
+
+            save_user_data(user, merged_df)
             st.success(f"✅ {len(bulk_df)} rows uploaded successfully for {user}!")
+
 
 
 # =====================================================
