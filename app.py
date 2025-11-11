@@ -162,27 +162,17 @@ if user_input:
     # Render Grid
     # -----------------------------
     grid_response = AgGrid(
-        df,
-        gridOptions=grid_options,
-        update_mode=GridUpdateMode.VALUE_CHANGED,
-        fit_columns_on_grid_load=False,
-        allow_unsafe_jscode=True,
-        theme="alpine",
-        height=550,
-        width='100%',
-    )
+    df,
+    gridOptions=grid_options,
+    update_mode=GridUpdateMode.VALUE_CHANGED,
+    fit_columns_on_grid_load=True,   # <-- auto-fit columns
+    allow_unsafe_jscode=True,
+    theme="alpine",
+    height=550,
+    width='100%',
+)
 
-    updated_df = grid_response["data"]
-
-    # -----------------------------
-    # Auto-fit columns
-    # -----------------------------
-    if updated_df.shape[1] > 0:
-        js_code = """
-        params.columnApi.autoSizeAllColumns();
-        """
-        grid_response["js_code"] = js_code
-
+       
     # -----------------------------
     # Save / Upload Buttons
     # -----------------------------
