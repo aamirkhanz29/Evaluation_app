@@ -88,12 +88,12 @@ if user_input:
     # Dropdown options
     status_options = ["Uploaded", "Already Uploaded", "Only Sheet uploaded", "Audited", "Rejected", "Previously Processed"]
 
-    # -----------------------------
-    # Configure AG-Grid
-    # -----------------------------
-   from st_aggrid.shared import JsCode
+# -----------------------------
+# Configure AG-Grid (Excel-like)
+# -----------------------------
+from st_aggrid.shared import JsCode
 
-# build grid options
+# Build grid options
 gb = GridOptionsBuilder.from_dataframe(df)
 
 gb.configure_default_column(
@@ -106,7 +106,7 @@ gb.configure_default_column(
     cellStyle={'border': '1px solid #e0e0e0', 'fontSize': '13px'},
 )
 
-# dropdowns
+# Dropdowns
 gb.configure_column(
     "Status",
     editable=True,
@@ -120,7 +120,7 @@ gb.configure_column(
     cellEditorParams={"values": ["True", "False"]},
 )
 
-# grid options for Excel-like copy/paste
+# Grid options for Excel-like copy/paste
 gb.configure_grid_options(
     enableRangeSelection=True,
     enableClipboard=True,
@@ -133,22 +133,22 @@ gb.configure_grid_options(
     suppressRowClickSelection=True,
 )
 
-# Auto-fit columns when grid ready
+# Auto-fit columns when grid is ready
 gb.configure_grid_options(onGridReady=JsCode("""
-function(params) {
-    params.api.sizeColumnsToFit();
-    document.addEventListener('paste', function(e) {
-        // focus grid before paste
-        params.api.gridBodyCtrl.focusController.focusGridView();
-    });
-}
+    function(params) {
+        params.api.sizeColumnsToFit();
+        document.addEventListener('paste', function(e) {
+            // focus grid before paste
+            params.api.gridBodyCtrl.focusController.focusGridView();
+        });
+    }
 """))
 
 grid_options = gb.build()
 
 st.info("💡 Tip: Copy multiple cells in Excel (Ctrl+C) → click inside this grid → paste (Ctrl+V).")
 
-# render grid
+# Render grid
 grid_response = AgGrid(
     df,
     gridOptions=grid_options,
@@ -159,7 +159,9 @@ grid_response = AgGrid(
     height=550,
     width='100%',
 )
+
 updated_df = grid_response["data"]
+
 
 # -----------------------------
 # ADMIN PANEL
