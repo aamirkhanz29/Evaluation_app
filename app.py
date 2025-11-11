@@ -76,21 +76,25 @@ if user_input:
     # Load user data
     df = get_user_data(user)
 
-    # Ensure all columns exist and convert to strings for editing
+    # Ensure all columns exist
     for col in COLUMNS:
         if col not in df.columns:
             df[col] = ""
         df[col] = df[col].astype(str).replace("None", "")
 
-    # Always keep 5 blank rows at the bottom
-    for _ in range(5):
-        df.loc[len(df)] = ["" for _ in COLUMNS]
+    # Always show 10 blank rows for pasting
+    if df.empty:
+        df = pd.DataFrame([{col: "" for col in COLUMNS} for _ in range(10)])
+    else:
+        # Append 10 blank rows for new data
+        for _ in range(10):
+            df.loc[len(df)] = ["" for _ in COLUMNS]
 
     # Dropdown options
     status_options = ["Uploaded", "Already Uploaded", "Only Sheet uploaded", "Audited", "Rejected", "Previously Processed"]
 
     # -----------------------------
-    # Configure AG-Grid (Excel-like)
+    # CONFIGURE AG-GRID
     # -----------------------------
     gb = GridOptionsBuilder.from_dataframe(df)
 
@@ -104,7 +108,6 @@ if user_input:
         cellStyle={'border': '1px solid #e0e0e0', 'fontSize': '13px'},
     )
 
-    # Dropdowns
     gb.configure_column(
         "Status",
         editable=True,
@@ -118,7 +121,7 @@ if user_input:
         cellEditorParams={"values": ["True", "False"]},
     )
 
-    # Grid options for Excel-like copy/paste
+    # Enable Excel-style copy/paste
     gb.configure_grid_options(
         enableRangeSelection=True,
         enableClipboard=True,
@@ -131,12 +134,11 @@ if user_input:
         suppressRowClickSelection=True,
     )
 
-    # Auto-fit columns when grid is ready
+    # Auto-fit columns and focus grid for paste
     gb.configure_grid_options(onGridReady=JsCode("""
         function(params) {
             params.api.sizeColumnsToFit();
             document.addEventListener('paste', function(e) {
-                // focus grid before paste
                 params.api.gridBodyCtrl.focusController.focusGridView();
             });
         }
@@ -144,9 +146,8 @@ if user_input:
 
     grid_options = gb.build()
 
-    st.info("💡 Tip: Copy multiple cells in Excel (Ctrl+C) → click inside this grid → paste (Ctrl+V).")
+    st.info("💡 Tip: Copy multiple cells from Excel → click anywhere in this grid (once, do not double-click) → Ctrl+V to paste.")
 
-    # Render grid
     grid_response = AgGrid(
         df,
         gridOptions=grid_options,
@@ -159,6 +160,15 @@ if user_input:
     )
 
     updated_df = grid_response["data"]
+
+    # -----------------------------
+    # SAVE BUTTON
+    # -----------------------------
+    if st.button("💾 Save Changes"):
+        updated_df["Source"] = user
+        updated_df = calculate_time_diff(updated_df)
+        save_user_data(user, updated_df)
+        st.success(f"✅ Changes saved for {user}!")
 
 # -----------------------------
 # ADMIN PANEL
@@ -179,14 +189,13 @@ if tables:
             with engine.connect() as conn:
                 conn.execute(f"DROP TABLE IF EXISTS '{sheet_to_delete}'")
             st.success(f"✅ Sheet '{sheet_to_delete}' deleted!")
-            st.rerun()
+            st.experimental_rerun()
 
     st.markdown("### 💾 Download All User Data")
     combined_df = get_all_data()
     if not combined_df.empty:
         combined_df = calculate_time_diff(combined_df)
 
-        # Prepare files
         csv_data = combined_df.to_csv(index=False).encode("utf-8")
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
@@ -198,7 +207,6 @@ if tables:
             file_name="combined_data.csv",
             mime="text/csv"
         )
-
         st.download_button(
             label="⬇️ Download Combined Data as Excel",
             data=excel_buffer.getvalue(),
