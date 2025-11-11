@@ -4,41 +4,36 @@ from datetime import datetime
 from sqlalchemy import create_engine, inspect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 import io
-import re
 
-# =====================================================
+# -----------------------------
 # DATABASE SETUP
-# =====================================================
+# -----------------------------
 engine = create_engine('sqlite:///cloudbase.db')
 
-# Define consistent columns
+# Define columns
 COLUMNS = [
     "Date", "Tasks", "DOS", "Status", "Audit_Status",
     "User_ID", "Comments", "Auditor_Comments",
     "Audit_Date", "Timestamp", "Time_Difference", "Source"
 ]
 
-# =====================================================
+# -----------------------------
 # HELPER FUNCTIONS
-# =====================================================
-def clean_user_name(name: str) -> str:
-    """Normalize usernames and make DB-safe table names."""
-    return re.sub(r'\W+', '_', name.strip().lower())
-
-def get_user_data(user: str) -> pd.DataFrame:
-    """Load user's table from database."""
+# -----------------------------
+def get_user_data(user):
+    """Load user's sheet from the database"""
     try:
         df = pd.read_sql(f"SELECT * FROM '{user}'", engine)
-    except Exception:
+    except:
         df = pd.DataFrame(columns=COLUMNS)
     return df
 
-def save_user_data(user: str, df: pd.DataFrame):
-    """Save user's DataFrame to SQLite."""
+def save_user_data(user, df):
+    """Save user's data back to the database"""
     df.to_sql(user, engine, if_exists="replace", index=False)
 
-def get_all_data() -> pd.DataFrame:
-    """Combine all user tables."""
+def get_all_data():
+    """Combine all sheets"""
     inspector = inspect(engine)
     tables = inspector.get_table_names()
     all_data = []
@@ -47,26 +42,27 @@ def get_all_data() -> pd.DataFrame:
             df = pd.read_sql(f"SELECT * FROM '{t}'", engine)
             df["Source_Sheet"] = t
             all_data.append(df)
-        except Exception:
+        except:
             continue
     if all_data:
         return pd.concat(all_data, ignore_index=True)
     return pd.DataFrame(columns=COLUMNS)
 
-def calculate_time_diff(df: pd.DataFrame) -> pd.DataFrame:
-    """Calculate sequential time difference by timestamp."""
+def calculate_time_diff(df):
+    """Calculate time difference between timestamps"""
     df = df.copy()
-    if "Timestamp" not in df:
-        return df
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors='coerce')
-    df = df.sort_values("Timestamp", ignore_index=True)
-    df["Time_Difference"] = df["Timestamp"].diff().fillna(pd.Timedelta(0))
+    df["Time_Difference"] = df["Timestamp"].diff().fillna(pd.Timedelta(seconds=0))
     df["Time_Difference"] = df["Time_Difference"].astype(str)
     return df
 
-# =====================================================
+def clean_user_name(name):
+    """Normalize usernames to prevent duplicates"""
+    return name.strip().lower()
+
+# -----------------------------
 # STREAMLIT UI
-# =====================================================
+# -----------------------------
 st.set_page_config(page_title="Cloud Tracker", layout="wide")
 st.title("☁️ Cloud-Based Productivity & Audit Tracker")
 
@@ -76,19 +72,26 @@ if user_input:
     user = clean_user_name(user_input)
     st.subheader(f"📄 Sheet for {user}")
 
-    # Load or initialize data
+    # Load user data
     df = get_user_data(user)
-    if df.empty:
-        df = pd.DataFrame([{col: "" for col in COLUMNS} for _ in range(20)])
 
-    status_options = ["Pending", "In Progress", "Completed", "Audited", "Rejected"]
+    # Ensure all columns exist and convert to strings for editing
+    for col in COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].astype(str).replace("None", "")
+
+    # Always keep 5 blank rows at the bottom
+    for _ in range(5):
+        df.loc[len(df)] = ["" for _ in COLUMNS]
+
+    # Dropdown options
+    status_options = ["Uploaded", "Already Uploaded", "Only Sheet uploaded", "Audited", "Rejected", "Previously Processed"]
 
     # -----------------------------
-    # Excel-like AgGrid
+    # Configure AG-Grid
     # -----------------------------
     gb = GridOptionsBuilder.from_dataframe(df)
-
-    # Make all columns editable and show gridlines
     gb.configure_default_column(
         editable=True,
         resizable=True,
@@ -96,106 +99,77 @@ if user_input:
         filter=True,
         wrapText=True,
         autoHeight=True,
-        cellStyle={'border': '1px solid lightgray'},
+        cellStyle={'border': '1px solid #e0e0e0', 'fontSize': '13px'},
     )
-
-    # Freeze first column
-    gb.configure_column(df.columns[0], pinned='left')  # Freeze "Date"
-
-    gb.configure_grid_options(
-        enableRangeSelection=True,
-        enableClipboard=True,
-        stopEditingWhenCellsLoseFocus=False,
-        suppressRowClickSelection=True,
-        enterMovesDownAfterEdit=True,
-        undoRedoCellEditing=True,
-        undoRedoCellEditingLimit=200,
-        enableFillHandle=True,
-        rowDragManaged=True,
-        suppressHorizontalScroll=False,
-        rowSelection='multiple',
-        allowContextMenuWithControlKey=True,
-        defaultColDef={'headerClass': 'excel-header'},
-        suppressFieldDotNotation=True,
-        floatingFilter=True,
-        domLayout='normal',
-    )
-
-    # Dropdowns
     gb.configure_column(
         "Status",
         editable=True,
-        cellEditor='agSelectCellEditor',
-        cellEditorParams={'values': status_options}
+        cellEditor="agSelectCellEditor",
+        cellEditorParams={"values": status_options},
     )
     gb.configure_column(
         "Audit_Status",
         editable=True,
-        cellEditor='agSelectCellEditor',
-        cellEditorParams={'values': [True, False]}
+        cellEditor="agSelectCellEditor",
+        cellEditorParams={"values": ["True", "False"]},
+    )
+
+    gb.configure_grid_options(
+        enableRangeSelection=True,
+        enableClipboard=True,
+        clipboardDelimiters={"row": "\n", "column": "\t"},
+        stopEditingWhenCellsLoseFocus=False,
+        undoRedoCellEditing=True,
+        undoRedoCellEditingLimit=100,
+        enableFillHandle=True,  # Excel-style drag fill
+        rowDragManaged=True,
     )
 
     grid_options = gb.build()
 
-    st.info("💡 Tip: Copy multiple rows from Excel or Sheets and paste directly here (Ctrl+V). Scroll horizontally and vertically; first column is frozen.")
+    # Add a small style hint
+    st.info("💡 Tip: You can copy from Excel or Google Sheets and paste directly into this grid (Ctrl + V).")
 
-    # -----------------------------
-    # Custom CSS for headers and gridlines
-    # -----------------------------
-    st.markdown("""
-    <style>
-    .ag-header-cell-label { 
-        font-weight: bold;
-        text-align: center;
-    }
-    .ag-theme-alpine .ag-cell {
-        border: 1px solid lightgray !important;
-    }
-    .ag-theme-alpine .ag-header-cell {
-        border: 1px solid gray !important;
-        background-color: #f3f3f3;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # -----------------------------
-    # Render Grid
-    # -----------------------------
     grid_response = AgGrid(
-    df,
-    gridOptions=grid_options,
-    update_mode=GridUpdateMode.VALUE_CHANGED,
-    fit_columns_on_grid_load=True,   # <-- auto-fit columns
-    allow_unsafe_jscode=True,
-    theme="alpine",
-    height=550,
-    width='100%',
-)
+        df,
+        gridOptions=grid_options,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
+        fit_columns_on_grid_load=True,
+        allow_unsafe_jscode=True,
+        theme="alpine",
+        height=550,
+        width='100%',
+    )
 
-       
+    updated_df = grid_response["data"]
+
     # -----------------------------
-    # Save / Upload Buttons
+    # Action Buttons
     # -----------------------------
     col1, col2 = st.columns(2)
 
     with col1:
         if st.button("💾 Save Changes"):
             now = datetime.now()
-            updated_df["Date"] = pd.to_datetime(updated_df["Date"], errors="coerce").fillna(now.date())
-            updated_df["Timestamp"] = pd.to_datetime(updated_df["Timestamp"], errors="coerce").fillna(now.isoformat())
+
+            # Convert strings to datetime safely
+            updated_df["Date"] = pd.to_datetime(updated_df["Date"], errors='coerce')
+            updated_df["Timestamp"] = pd.to_datetime(updated_df["Timestamp"], errors='coerce')
+
+            # Auto-fill current date/timestamp if missing
+            updated_df["Date"] = updated_df["Date"].fillna(now.date())
+            updated_df["Timestamp"] = updated_df["Timestamp"].fillna(now.isoformat())
+
+            # Auto-fill audit date if audited
             updated_df["Audit_Date"] = updated_df.apply(
-                lambda r: now.date() if str(r.get("Audit_Status")).lower() == "true" and pd.isna(r.get("Audit_Date"))
+                lambda r: now.date()
+                if str(r.get("Audit_Status")).lower() == "true" and not r.get("Audit_Date")
                 else r.get("Audit_Date"),
                 axis=1,
             )
+
             updated_df["Source"] = user
             updated_df = calculate_time_diff(updated_df)
-
-            # Keep 5 blank rows at bottom
-            blanks_needed = 5 - (updated_df.tail(5).notna().any(axis=1).sum())
-            if blanks_needed > 0:
-                for _ in range(blanks_needed):
-                    updated_df.loc[len(updated_df)] = [""] * len(COLUMNS)
 
             save_user_data(user, updated_df)
             st.success("✅ All changes saved successfully!")
@@ -207,6 +181,7 @@ if user_input:
                 bulk_df = pd.read_csv(uploaded_file)
             else:
                 bulk_df = pd.read_excel(uploaded_file)
+
             for col in COLUMNS:
                 if col not in bulk_df.columns:
                     bulk_df[col] = ""
@@ -217,18 +192,16 @@ if user_input:
             merged_df["Source"] = user
             merged_df = calculate_time_diff(merged_df)
 
-            # Keep 5 blank rows for future entries
+            # Keep 5 blank rows again
             for _ in range(5):
-                merged_df.loc[len(merged_df)] = [""] * len(COLUMNS)
+                merged_df.loc[len(merged_df)] = ["" for _ in COLUMNS]
 
             save_user_data(user, merged_df)
             st.success(f"✅ {len(bulk_df)} rows uploaded successfully for {user}!")
 
-
-
-# =====================================================
+# -----------------------------
 # ADMIN PANEL
-# =====================================================
+# -----------------------------
 st.markdown("---")
 st.subheader("🛠️ Admin Panel")
 
@@ -245,17 +218,17 @@ if tables:
             with engine.connect() as conn:
                 conn.execute(f"DROP TABLE IF EXISTS '{sheet_to_delete}'")
             st.success(f"✅ Sheet '{sheet_to_delete}' deleted!")
-            st.experimental_rerun()
+            st.rerun()
 
-    # Download section
     st.markdown("### 💾 Download All User Data")
     combined_df = get_all_data()
     if not combined_df.empty:
         combined_df = calculate_time_diff(combined_df)
 
-        csv_data = combined_df.to_csv(index=False).encode('utf-8')
+        # Prepare files
+        csv_data = combined_df.to_csv(index=False).encode("utf-8")
         excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
             combined_df.to_excel(writer, index=False, sheet_name="All_Data")
 
         st.download_button(
