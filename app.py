@@ -104,48 +104,61 @@ if user_input:
     updated_df = grid_response["data"]
 
     # Buttons
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("💾 Save Changes"):
-            now = datetime.now()
+    col1, col2, col3 = st.columns(3)
 
-            # Auto-fill missing Date & Timestamp
-            updated_df["Date"] = updated_df["Date"].replace("", pd.NaT)
-            updated_df["Date"] = updated_df["Date"].fillna(now.date())
+with col1:
+    if st.button("💾 Save Changes"):
+        now = datetime.now()
 
-            updated_df["Timestamp"] = updated_df["Timestamp"].replace("", pd.NaT)
-            updated_df["Timestamp"] = updated_df["Timestamp"].fillna(now.isoformat())
+        # Auto-fill missing Date & Timestamp
+        updated_df["Date"] = updated_df["Date"].replace("", pd.NaT)
+        updated_df["Date"] = updated_df["Date"].fillna(now.date())
 
-            # Auto-fill Audit Date if Audit_Status == True
-            updated_df["Audit_Date"] = updated_df.apply(
-                lambda r: now.date() if str(r.get("Audit_Status")).lower() == "true" else r.get("Audit_Date"),
-                axis=1
-            )
+        updated_df["Timestamp"] = updated_df["Timestamp"].replace("", pd.NaT)
+        updated_df["Timestamp"] = updated_df["Timestamp"].fillna(now.isoformat())
 
-            updated_df["Source"] = user
-            updated_df = calculate_time_diff(updated_df)
+        # Auto-fill Audit Date if Audit_Status == True
+        updated_df["Audit_Date"] = updated_df.apply(
+            lambda r: now.date() if str(r.get("Audit_Status")).lower() == "true" else r.get("Audit_Date"),
+            axis=1
+        )
 
-            save_user_data(user, updated_df)
-            st.success("✅ Changes saved successfully!")
+        updated_df["Source"] = user
+        updated_df = calculate_time_diff(updated_df)
 
-    with col2:
-        if st.button("➕ Add New Row"):
-            new_row = pd.DataFrame([{col: "" for col in COLUMNS}])
-            updated_df = pd.concat([updated_df, new_row], ignore_index=True)
-            save_user_data(user, updated_df)
-            st.experimental_rerun()
+        save_user_data(user, updated_df)
+        st.success("✅ Changes saved successfully!")
 
-    # Display Data
-    st.markdown("### 📊 Your Current Sheet")
-    st.dataframe(updated_df, use_container_width=True)
+with col2:
+    if st.button("➕ Add New Row"):
+        new_row = pd.DataFrame([{col: "" for col in COLUMNS}])
+        updated_df = pd.concat([updated_df, new_row], ignore_index=True)
+        save_user_data(user, updated_df)
+        st.experimental_rerun()
 
-    # Combined View
-    st.markdown("---")
-    if st.button("📈 View Combined Data (All Users)"):
-        combined_df = get_all_data()
-        combined_df = calculate_time_diff(combined_df)
-        st.dataframe(combined_df, use_container_width=True)
+with col3:
+    uploaded_file = st.file_uploader("📤 Upload CSV/Excel for Bulk Entry", type=["csv", "xlsx"])
+    if uploaded_file:
+        if uploaded_file.name.endswith(".csv"):
+            bulk_df = pd.read_csv(uploaded_file)
+        else:
+            bulk_df = pd.read_excel(uploaded_file)
 
+        # Ensure all expected columns exist
+        for col in COLUMNS:
+            if col not in bulk_df.columns:
+                bulk_df[col] = ""
+
+        bulk_df = bulk_df[COLUMNS]
+
+        # Merge and clean
+        merged_df = pd.concat([updated_df, bulk_df], ignore_index=True).drop_duplicates()
+        merged_df["Source"] = user
+        merged_df = calculate_time_diff(merged_df)
+        save_user_data(user, merged_df)
+
+        st.success(f"✅ {len(bulk_df)} rows uploaded successfully for {user}!")
+        st.experimental_rerun()
 # -----------------------------
 # ADMIN PANEL
 # -----------------------------
@@ -196,5 +209,3 @@ if tables:
         st.info("No data available to download.")
 else:
     st.info("No user sheets found.")
-
-
