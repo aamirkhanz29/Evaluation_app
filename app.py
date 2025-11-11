@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import sqlalchemy
 from sqlalchemy import create_engine, inspect
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 import io
@@ -197,4 +196,5 @@ if tables:
         st.info("No data available to download.")
 else:
     st.info("No user sheets found.")
+
 
