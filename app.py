@@ -76,50 +76,68 @@ if user_input:
     user = clean_user_name(user_input)
     st.subheader(f"📄 Sheet for {user}")
 
-    # Load or create user data
+    # Load or initialize data
     df = get_user_data(user)
     if df.empty:
-        df = pd.DataFrame(columns=COLUMNS)
+        # Preload 5 empty rows so user can paste multiple entries easily
+        df = pd.DataFrame([{col: "" for col in COLUMNS} for _ in range(5)])
 
     # Dropdown values
     status_options = ["Pending", "In Progress", "Completed", "Audited", "Rejected"]
 
-    # Build grid
+    # Build editable grid
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(editable=True, resizable=True)
-    gb.configure_grid_options(enableRangeSelection=True, enableCellTextSelection=True, enableClipboard=True)
-    gb.configure_selection('multiple', use_checkbox=True)
-    gb.configure_column("Status", editable=True, cellEditor='agSelectCellEditor',
-                        cellEditorParams={'values': status_options})
-    gb.configure_column("Audit_Status", editable=True, cellEditor='agSelectCellEditor',
-                        cellEditorParams={'values': [True, False]})
+    gb.configure_grid_options(
+        enableRangeSelection=True,
+        enableCellTextSelection=True,
+        enableClipboard=True,
+        rowSelection='multiple',
+        rowDragManaged=True,
+        suppressRowClickSelection=False,
+        stopEditingWhenCellsLoseFocus=False
+    )
+
+    gb.configure_column(
+        "Status",
+        editable=True,
+        cellEditor='agSelectCellEditor',
+        cellEditorParams={'values': status_options}
+    )
+    gb.configure_column(
+        "Audit_Status",
+        editable=True,
+        cellEditor='agSelectCellEditor',
+        cellEditorParams={'values': [True, False]}
+    )
 
     grid_options = gb.build()
+
     grid_response = AgGrid(
         df,
         gridOptions=grid_options,
         update_mode=GridUpdateMode.VALUE_CHANGED,
         fit_columns_on_grid_load=True,
+        allow_unsafe_jscode=True,  # required for full clipboard/paste
         theme="alpine"
     )
 
     updated_df = grid_response["data"]
 
     # Action buttons
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
         if st.button("💾 Save Changes"):
             now = datetime.now()
 
-            # Fill missing date/timestamp
-            updated_df["Date"] = updated_df["Date"].replace("", pd.NaT)
-            updated_df["Date"] = updated_df["Date"].fillna(now.date())
+            # Clean up data before save
+            updated_df["Date"] = pd.to_datetime(updated_df["Date"], errors="coerce")
+            updated_df["Timestamp"] = pd.to_datetime(updated_df["Timestamp"], errors="coerce")
 
-            updated_df["Timestamp"] = updated_df["Timestamp"].replace("", pd.NaT)
+            updated_df["Date"] = updated_df["Date"].fillna(now.date())
             updated_df["Timestamp"] = updated_df["Timestamp"].fillna(now.isoformat())
 
-            # Only set Audit_Date if Audit_Status = True and Audit_Date empty
             updated_df["Audit_Date"] = updated_df.apply(
                 lambda r: now.date()
                 if str(r.get("Audit_Status")).lower() == "true" and pd.isna(r.get("Audit_Date"))
@@ -129,18 +147,10 @@ if user_input:
 
             updated_df["Source"] = user
             updated_df = calculate_time_diff(updated_df)
-
             save_user_data(user, updated_df)
-            st.success("✅ Changes saved successfully!")
+            st.success("✅ All changes saved successfully!")
 
     with col2:
-        if st.button("➕ Add New Row"):
-            new_row = pd.DataFrame([{col: "" for col in COLUMNS}])
-            updated_df = pd.concat([updated_df, new_row], ignore_index=True)
-            save_user_data(user, updated_df)
-            st.experimental_rerun()
-
-    with col3:
         uploaded_file = st.file_uploader("📤 Upload CSV/Excel for Bulk Entry", type=["csv", "xlsx"])
         if uploaded_file:
             if uploaded_file.name.endswith(".csv"):
@@ -148,14 +158,11 @@ if user_input:
             else:
                 bulk_df = pd.read_excel(uploaded_file)
 
-            # Ensure all columns exist
             for col in COLUMNS:
                 if col not in bulk_df.columns:
                     bulk_df[col] = ""
-
             bulk_df = bulk_df[COLUMNS]
 
-            # Merge and clean
             merged_df = pd.concat([updated_df, bulk_df], ignore_index=True)
             merged_df = merged_df.drop_duplicates(subset=["Date", "Tasks", "DOS"], keep="last")
             merged_df["Source"] = user
@@ -163,7 +170,7 @@ if user_input:
             save_user_data(user, merged_df)
 
             st.success(f"✅ {len(bulk_df)} rows uploaded successfully for {user}!")
-            st.experimental_rerun()
+
 
 # =====================================================
 # ADMIN PANEL
